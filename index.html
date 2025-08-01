@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supplement Box Image Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        
+        .upload-section {
+            border: 2px dashed #ccc;
+            border-radius: 4px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .upload-section:hover {
+            border-color: #999;
+        }
+        
+        .unit-selector {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        select {
+            padding: 8px 12px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: block;
+            margin: 20px auto;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            margin-top: 30px;
+        }
+        
+        .stats {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .stats h3 {
+            margin-top: 0;
+        }
+        
+        .stat-item {
+            display: inline-block;
+            margin-right: 20px;
+        }
+        
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+        }
+        
+        #imageCanvas {
+            display: block;
+            margin: 20px auto;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .error {
+            color: red;
+            text-align: center;
+            margin: 10px 0;
+        }
+        
+        .success {
+            color: green;
+            text-align: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Supplement Box Image Generator</h1>
+        
+        <div class="upload-section">
+            <h2>Upload CSV Data</h2>
+            <input type="file" id="csvFile" accept=".csv">
+            <p>Upload a CSV file containing weight measurements (one value per line)</p>
+        </div>
+        
+        <div class="unit-selector">
+            <label for="unitSelect">Select Unit:</label>
+            <select id="unitSelect">
+                <option value="mcg">mcg</option>
+                <option value="mg">mg</option>
+                <option value="g">g</option>
+            </select>
+        </div>
+        
+        <div class="unit-selector">
+            <label for="binsSlider">Number of Bins:</label>
+            <input type="range" id="binsSlider" min="4" max="20" value="8" step="1">
+            <span id="binsValue">8</span>
+        </div>
+        
+        <button id="generateBtn" disabled>Generate Supplement Box Image</button>
+        <button id="testBtn" style="background-color: #007bff; margin-top: 10px;">Load Test Data & Generate</button>
+        
+        <div id="error" class="error hidden"></div>
+        <div id="success" class="success hidden"></div>
+        
+        <div class="results hidden" id="results">
+            <div class="stats">
+                <h3>Calculated Statistics</h3>
+                <div class="stat-item">Mean: <span id="meanValue"></span></div>
+                <div class="stat-item">Standard Deviation: <span id="stdDevValue"></span></div>
+                <div class="stat-item">Sample Size: <span id="sampleSizeValue"></span></div>
+                <div class="stat-item">Range: <span id="rangeValue"></span></div>
+            </div>
+            
+            <h3>Data Visualization</h3>
+            <canvas id="plotCanvas" width="600" height="400"></canvas>
+            
+            <h3>Generated Supplement Box Image</h3>
+            <canvas id="imageCanvas" width="800" height="800"></canvas>
+            <button id="downloadBtn">Download Image</button>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const csvFileInput = document.getElementById('csvFile');
+        const unitSelect = document.getElementById('unitSelect');
+        const generateBtn = document.getElementById('generateBtn');
+        const errorDiv = document.getElementById('error');
+        const successDiv = document.getElementById('success');
+        const resultsDiv = document.getElementById('results');
+        const meanValue = document.getElementById('meanValue');
+        const stdDevValue = document.getElementById('stdDevValue');
+        const sampleSizeValue = document.getElementById('sampleSizeValue');
+        const rangeValue = document.getElementById('rangeValue');
+        const plotCanvas = document.getElementById('plotCanvas');
+        const imageCanvas = document.getElementById('imageCanvas');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const testBtn = document.getElementById('testBtn');
+        const binsSlider = document.getElementById('binsSlider');
+        const binsValue = document.getElementById('binsValue');
+        
+        // Data storage
+        let dataPoints = [];
+        
+        // Event Listeners
+        csvFileInput.addEventListener('change', handleFileSelect);
+        generateBtn.addEventListener('click', generateImage);
+        downloadBtn.addEventListener('click', downloadImage);
+        testBtn.addEventListener('click', loadTestDataAndGenerate);
+        binsSlider.addEventListener('input', updateBinsValue);
+        
+        // Handle file selection
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            // Reset previous state
+            hideError();
+            hideSuccess();
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const csvData = e.target.result;
+                    parseCSV(csvData);
+                    generateBtn.disabled = false;
+                } catch (error) {
+                    showError('Error parsing CSV file: ' + error.message);
+                    generateBtn.disabled = true;
+                }
+            };
+            reader.readAsText(file);
+        }
+        
+        // Parse CSV data
+        function parseCSV(csvData) {
+            dataPoints = [];
+            const lines = csvData.split('\n');
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (line === '') continue;
+                
+                // Try to parse as number
+                const value = parseFloat(line);
+                if (isNaN(value)) {
+                    throw new Error(`Invalid number on line ${i+1}: ${line}`);
+                }
+                dataPoints.push(value);
+            }
+            
+            if (dataPoints.length === 0) {
+                throw new Error('No valid data points found in CSV');
+            }
+            
+            // Set smart default bin count
+            const smartBins = calculateSmartBinCount(dataPoints.length);
+            binsSlider.value = smartBins;
+            binsValue.textContent = smartBins;
+            
+            showSuccess(`Successfully loaded ${dataPoints.length} data points`);
+        }
+        
+        // Calculate statistics
+        function calculateStatistics(data) {
+            const n = data.length;
+            const sum = data.reduce((a, b) => a + b, 0);
+            const mean = sum / n;
+            
+            const squaredDiffs = data.map(x => Math.pow(x - mean, 2));
+            const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / n;
+            const stdDev = Math.sqrt(avgSquaredDiff);
+            
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            const range = max - min;
+            
+            return {
+                mean: mean,
+                stdDev: stdDev,
+                sampleSize: n,
+                min: min,
+                max: max,
+                range: range
+            };
+        }
+        
+        // Unit conversion
+        function convertUnits(data, fromUnit, toUnit) {
+            if (fromUnit === toUnit) return data;
+            
+            // Convert to mg as base unit
+            let convertedData = data.map(value => {
+                if (fromUnit === 'g') {
+                    return value * 1000; // g to mg
+                } else if (fromUnit === 'mcg') {
+                    return value / 1000; // mcg to mg
+                }
+                return value;
+            });
+            
+            // Convert to target unit if needed
+            if (toUnit === 'g') {
+                convertedData = convertedData.map(value => value / 1000); // mg to g
+            } else if (toUnit === 'mcg') {
+                convertedData = convertedData.map(value => value * 1000); // mg to mcg
+            }
+            
+            return convertedData;
+        }
+        
+        // Create histogram bins
+        function createHistogramBins(data, binCount) {
+            const min = Math.min(...data);
+            const max = Math.max(...data);
+            const range = max - min;
+            const binWidth = range / binCount;
+            
+            const bins = Array(binCount).fill(0);
+            const binEdges = Array(binCount + 1).fill(0);
+            
+            // Calculate bin edges
+            for (let i = 0; i <= binCount; i++) {
+                binEdges[i] = min + i * binWidth;
+            }
+            
+            // Count data points in each bin
+            data.forEach(value => {
+                const binIndex = Math.min(Math.floor((value - min) / binWidth), binCount - 1);
+                bins[binIndex]++;
+            });
+            
+            return {
+                bins: bins,
+                edges: binEdges
+            };
+        }
+        
+        // Create custom histogram bins with specified range (for 3-sigma range)
+        function createCustomHistogramBins(data, binCount, rangeMin, rangeMax) {
+            const range = rangeMax - rangeMin;
+            const binWidth = range / binCount;
+            
+            const bins = Array(binCount).fill(0);
+            const binEdges = Array(binCount + 1).fill(0);
+            
+            // Calculate bin edges
+            for (let i = 0; i <= binCount; i++) {
+                binEdges[i] = rangeMin + i * binWidth;
+            }
+            
+            // Count data points in each bin
+            data.forEach(value => {
+                if (value >= rangeMin && value <= rangeMax) {
+                    const binIndex = Math.min(Math.floor((value - rangeMin) / binWidth), binCount - 1);
+                    bins[binIndex]++;
+                }
+            });
+            
+            return {
+                bins: bins,
+                edges: binEdges
+            };
+        }
+        
+        // Draw histogram on canvas
+        function drawHistogram(ctx, data, stats) {
+            // Clear canvas
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            
+            // Set styles
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            ctx.strokeStyle = 'black';
+            ctx.fillStyle = 'black';
+            ctx.lineWidth = 1;
+            ctx.font = '12px Arial';
+            
+            // Calculate histogram
+            const binCount = Math.min(20, Math.max(5, Math.floor(Math.sqrt(data.length))));
+            const histogram = createHistogramBins(data, binCount);
+            
+            // Draw histogram
+            const margin = 50;
+            const width = ctx.canvas.width - 2 * margin;
+            const height = ctx.canvas.height - 2 * margin;
+            
+            // Find max bin count for scaling
+            const maxBinCount = Math.max(...histogram.bins);
+            
+            // Draw axes
+            ctx.beginPath();
+            ctx.moveTo(margin, margin);
+            ctx.lineTo(margin, ctx.canvas.height - margin);
+            ctx.lineTo(ctx.canvas.width - margin, ctx.canvas.height - margin);
+            ctx.stroke();
+            
+            // Draw axis labels
+            ctx.fillText('Frequency', margin - 40, margin + (height / 2));
+            ctx.save();
+            ctx.translate(margin + (width / 2), ctx.canvas.height - margin + 30);
+            ctx.fillText('Weight', 0, 0);
+            ctx.restore();
+            
+            // Draw histogram bars
+            const barWidth = width / binCount;
+            histogram.bins.forEach((count, i) => {
+                const barHeight = (count / maxBinCount) * (height - 20);
+                const x = margin + i * barWidth;
+                const y = ctx.canvas.height - margin - barHeight;
+                
+                ctx.fillRect(x, y, barWidth - 2, barHeight);
+                ctx.strokeRect(x, y, barWidth - 2, barHeight);
+            });
+            
+            // Draw normal distribution curve
+            drawNormalCurve(ctx, stats, margin, width, height);
+            
+            // Draw statistics text
+            ctx.fillText(`Mean: ${stats.mean.toFixed(2)}`, 20, 20);
+            ctx.fillText(`Std Dev: ${stats.stdDev.toFixed(2)}`, 20, 40);
+            ctx.fillText(`Sample Size: ${stats.sampleSize}`, 20, 60);
+        }
+        
+        // Draw normal distribution curve
+        function drawNormalCurve(ctx, stats, margin, width, height) {
+            const points = [];
+            const step = width / 100;
+            
+            // Generate points for normal curve
+            for (let i = 0; i <= 100; i++) {
+                const x = margin + i * step;
+                // Normalize x to data range
+                const normalizedX = stats.min + (i / 100) * (stats.max - stats.min);
+                
+                // Calculate normal distribution value
+                const exponent = -0.5 * Math.pow((normalizedX - stats.mean) / stats.stdDev, 2);
+                const normalValue = Math.exp(exponent) / (stats.stdDev * Math.sqrt(2 * Math.PI));
+                
+                // Scale to fit in plot area
+                const scaledY = height * 0.8 * normalValue;
+                const y = margin + height - scaledY;
+                
+                points.push({x: x, y: y});
+            }
+            
+            // Draw curve
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.stroke();
+        }
+        
+        // Create supplement box image (Black & White for pill box printing)
+        function createSupplementImage(ctx, stats, data) {
+            const size = ctx.canvas.width; // Square canvas (now 800x800)
+            const scale = size / 500; // Scale factor for proportional sizing
+            
+            // Clear canvas and set white background
+            ctx.clearRect(0, 0, size, size);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, size, size);
+            
+            // Main title - centered "STATISTICAL SUMMARY" (same size as DISTRIBUTION ANALYSIS)
+            ctx.fillStyle = 'black';
+            ctx.font = `bold ${Math.round(20 * scale)}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText('STATISTICAL SUMMARY', size / 2, 50 * scale);
+            
+            // Draw line above statistics section
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 1 * scale;
+            ctx.beginPath();
+            ctx.moveTo(40 * scale, 65 * scale);
+            ctx.lineTo(size - 40 * scale, 65 * scale);
+            ctx.stroke();
+            
+            // Statistics data (larger text) - moved up due to removed title
+            ctx.font = `${Math.round(16 * scale)}px Arial, sans-serif`;
+            const statY = 85 * scale;
+            const lineHeight = 24 * scale;
+            
+            ctx.textAlign = 'left';
+            ctx.fillText(`Mean Weight:`, 40 * scale, statY);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${stats.mean.toFixed(3)} ${unitSelect.value}`, size - 40 * scale, statY);
+            
+            ctx.textAlign = 'left';
+            ctx.fillText(`Std. Deviation:`, 40 * scale, statY + lineHeight);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${stats.stdDev.toFixed(3)} ${unitSelect.value}`, size - 40 * scale, statY + lineHeight);
+            
+            ctx.textAlign = 'left';
+            ctx.fillText(`Sample Size:`, 40 * scale, statY + 2 * lineHeight);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${stats.sampleSize}`, size - 40 * scale, statY + 2 * lineHeight);
+            
+            ctx.textAlign = 'left';
+            ctx.fillText(`Range:`, 40 * scale, statY + 3 * lineHeight);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${stats.min.toFixed(2)} - ${stats.max.toFixed(2)} ${unitSelect.value}`, size - 40 * scale, statY + 3 * lineHeight);
+            
+            // CV% (black and white)
+            const cv = (stats.stdDev / stats.mean) * 100;
+            ctx.textAlign = 'left';
+            ctx.fillText(`CV%:`, 40 * scale, statY + 4 * lineHeight);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${cv.toFixed(2)}%`, size - 40 * scale, statY + 4 * lineHeight);
+            
+            // Draw line below CV% section
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 1 * scale;
+            ctx.beginPath();
+            ctx.moveTo(40 * scale, statY + 4 * lineHeight + 15 * scale);
+            ctx.lineTo(size - 40 * scale, statY + 4 * lineHeight + 15 * scale);
+            ctx.stroke();
+            
+            // Distribution section (larger text) - moved up for more chart space
+            const distY = statY + 5 * lineHeight + 25 * scale;
+            ctx.font = `bold ${Math.round(20 * scale)}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText('DISTRIBUTION ANALYSIS', size / 2, distY);
+            
+            // Draw histogram and normal curve (black and white) - increased height
+            const chartY = distY + 25 * scale;
+            const chartHeight = size - chartY - 30 * scale; // More space for chart
+            drawBlackWhiteHistogramWithCurve(ctx, data, stats, 40 * scale, chartY, size - 80 * scale, chartHeight, scale);
+        }
+        
+        // Draw black and white histogram with visible normal distribution curve
+        function drawBlackWhiteHistogramWithCurve(ctx, data, stats, x, y, width, height, scale = 1) {
+            // Use slider value for bin count
+            const binCount = parseInt(binsSlider.value);
+            
+            // Use 3-sigma range for both histogram and curve
+            const chartMin = stats.mean - 3 * stats.stdDev;
+            const chartMax = stats.mean + 3 * stats.stdDev;
+            const chartRange = chartMax - chartMin;
+            
+            // Create custom histogram bins for the 3-sigma range
+            const customHistogram = createCustomHistogramBins(data, binCount, chartMin, chartMax);
+            const histogram = customHistogram;
+            
+            // Find max bin count for scaling
+            const maxBinCount = Math.max(...histogram.bins);
+            if (maxBinCount === 0) return;
+            
+            // Chart area (scaled)
+            const chartMargin = 15 * scale;
+            const chartX = x + chartMargin;
+            const chartY = y + chartMargin;
+            const chartWidth = width - 2 * chartMargin;
+            const chartHeight = height - 2 * chartMargin - 40 * scale; // Leave space for labels
+            
+            // Draw axes (black, scaled)
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3 * scale;
+            ctx.beginPath();
+            ctx.moveTo(chartX, chartY);
+            ctx.lineTo(chartX, chartY + chartHeight);
+            ctx.lineTo(chartX + chartWidth, chartY + chartHeight);
+            ctx.stroke();
+            
+            // Draw histogram bars (black outline, white fill, scaled)
+            const barWidth = chartWidth / binCount;
+            const barSpacing = 2 * scale;
+            
+            histogram.bins.forEach((count, i) => {
+                if (count === 0) return;
+                
+                const barHeight = (count / maxBinCount) * (chartHeight - 30 * scale);
+                const barX = chartX + i * barWidth + barSpacing;
+                const barY = chartY + chartHeight - barHeight;
+                const actualBarWidth = barWidth - 2 * barSpacing;
+                
+                // White fill
+                ctx.fillStyle = 'white';
+                ctx.fillRect(barX, barY, actualBarWidth, barHeight);
+                
+                // Black outline (scaled)
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 1.5 * scale;
+                ctx.strokeRect(barX, barY, actualBarWidth, barHeight);
+            });
+            
+            // Draw normal distribution curve (THICK BLACK LINE for visibility, scaled)
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 4 * scale;
+            ctx.setLineDash([]);
+            
+            // Calculate normal curve points with proper 3-sigma range
+            const curvePoints = [];
+            const numPoints = 100;
+            
+            // Find the maximum normal distribution value for scaling
+            let maxNormalValue = 0;
+            for (let i = 0; i <= numPoints; i++) {
+                const x_val = chartMin + (i / numPoints) * chartRange;
+                const normalValue = (1 / (stats.stdDev * Math.sqrt(2 * Math.PI))) *
+                                   Math.exp(-0.5 * Math.pow((x_val - stats.mean) / stats.stdDev, 2));
+                maxNormalValue = Math.max(maxNormalValue, normalValue);
+            }
+            
+            // Generate curve points
+            for (let i = 0; i <= numPoints; i++) {
+                const x_val = chartMin + (i / numPoints) * chartRange;
+                const normalValue = (1 / (stats.stdDev * Math.sqrt(2 * Math.PI))) *
+                                   Math.exp(-0.5 * Math.pow((x_val - stats.mean) / stats.stdDev, 2));
+                
+                // Scale to fit chart
+                const x_pixel = chartX + ((x_val - chartMin) / chartRange) * chartWidth;
+                const y_pixel = chartY + chartHeight - (normalValue / maxNormalValue) * (chartHeight - 30 * scale);
+                
+                curvePoints.push({x: x_pixel, y: y_pixel});
+            }
+            
+            // Draw the normal curve
+            if (curvePoints.length > 1) {
+                ctx.beginPath();
+                ctx.moveTo(curvePoints[0].x, curvePoints[0].y);
+                for (let i = 1; i < curvePoints.length; i++) {
+                    ctx.lineTo(curvePoints[i].x, curvePoints[i].y);
+                }
+                ctx.stroke();
+            }
+            
+            // Draw mean line (dashed black, scaled) - using 3-sigma range
+            const meanPosition = ((stats.mean - chartMin) / chartRange) * chartWidth;
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3 * scale;
+            ctx.setLineDash([12 * scale, 6 * scale]);
+            ctx.beginPath();
+            ctx.moveTo(chartX + meanPosition, chartY);
+            ctx.lineTo(chartX + meanPosition, chartY + chartHeight);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset line dash
+            
+            // Labels (black text, scaled)
+            ctx.fillStyle = 'black';
+            ctx.font = `${Math.round(14 * scale)}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            
+            // X-axis labels (3-sigma range) with units
+            ctx.fillText(`${chartMin.toFixed(1)} ${unitSelect.value}`, chartX, y + height - 15 * scale);
+            ctx.fillText(`${stats.mean.toFixed(1)} ${unitSelect.value}`, chartX + meanPosition, y + height - 15 * scale);
+            ctx.fillText(`${chartMax.toFixed(1)} ${unitSelect.value}`, chartX + chartWidth, y + height - 15 * scale);
+            
+            // Mean label (scaled)
+            ctx.font = `bold ${Math.round(16 * scale)}px Arial, sans-serif`;
+            ctx.fillText('μ', chartX + meanPosition, chartY - 8 * scale);
+            
+            // Legend (scaled)
+            ctx.font = `${Math.round(12 * scale)}px Arial, sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.fillText('— Normal Distribution', chartX, chartY - 25 * scale);
+            ctx.fillText('--- Mean (μ)', chartX + 180 * scale, chartY - 25 * scale);
+        }
+        
+        // Generate supplement box image
+        function generateImage() {
+            try {
+                // Reset previous state
+                hideError();
+                hideSuccess();
+                
+                // Get selected unit
+                const selectedUnit = unitSelect.value;
+                
+                // Convert data if needed
+                const convertedData = convertUnits(dataPoints, selectedUnit, selectedUnit);
+                
+                // Calculate statistics
+                const stats = calculateStatistics(convertedData);
+                
+                // Update statistics display
+                meanValue.textContent = `${stats.mean.toFixed(2)} ${selectedUnit}`;
+                stdDevValue.textContent = `${stats.stdDev.toFixed(2)} ${selectedUnit}`;
+                sampleSizeValue.textContent = stats.sampleSize;
+                rangeValue.textContent = `${stats.min.toFixed(2)} - ${stats.max.toFixed(2)} ${selectedUnit}`;
+                
+                // Draw visualization
+                const plotCtx = plotCanvas.getContext('2d');
+                drawHistogram(plotCtx, convertedData, stats);
+                
+                // Create supplement box image
+                const imageCtx = imageCanvas.getContext('2d');
+                createSupplementImage(imageCtx, stats, convertedData);
+                
+                // Show results
+                resultsDiv.classList.remove('hidden');
+                
+                showSuccess('Supplement box image generated successfully!');
+            } catch (error) {
+                showError('Error generating image: ' + error.message);
+            }
+        }
+        
+        // Download image
+        function downloadImage() {
+            try {
+                const link = document.createElement('a');
+                link.download = 'supplement-box-image.png';
+                link.href = imageCanvas.toDataURL('image/png');
+                link.click();
+                showSuccess('Image downloaded successfully!');
+            } catch (error) {
+                showError('Error downloading image: ' + error.message);
+            }
+        }
+        
+        // Show error message
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            successDiv.classList.add('hidden');
+        }
+        
+        // Hide error message
+        function hideError() {
+            errorDiv.classList.add('hidden');
+        }
+        
+        // Show success message
+        function showSuccess(message) {
+            successDiv.textContent = message;
+            successDiv.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+        }
+        
+        // Hide success message
+        function hideSuccess() {
+            successDiv.classList.add('hidden');
+        }
+        
+        // Update bins slider value display
+        function updateBinsValue() {
+            binsValue.textContent = binsSlider.value;
+            // Regenerate image if data is loaded
+            if (dataPoints.length > 0) {
+                generateImage();
+            }
+        }
+        
+        // Calculate smart default bin count
+        function calculateSmartBinCount(dataLength) {
+            // Use Sturges' rule as base: k = ceil(log2(n) + 1)
+            const sturges = Math.ceil(Math.log2(dataLength) + 1);
+            // Use square root rule as alternative: k = ceil(sqrt(n))
+            const sqrtRule = Math.ceil(Math.sqrt(dataLength));
+            // Take the average and constrain to reasonable range
+            const smartBins = Math.round((sturges + sqrtRule) / 2);
+            return Math.min(20, Math.max(4, smartBins));
+        }
+        
+        // Load test data and generate image
+        function loadTestDataAndGenerate() {
+            // Sample data from the CSV file
+            const testData = [99.8, 100.2, 101.1, 99.5, 100.8, 100.1, 99.9, 100.4, 100.7, 99.6,
+                             100.3, 100.9, 99.7, 100.5, 100.0, 99.4, 100.6, 101.0, 99.3, 100.2];
+            
+            dataPoints = testData;
+            
+            // Set smart default bin count
+            const smartBins = calculateSmartBinCount(dataPoints.length);
+            binsSlider.value = smartBins;
+            binsValue.textContent = smartBins;
+            
+            showSuccess(`Successfully loaded ${dataPoints.length} test data points`);
+            generateBtn.disabled = false;
+            
+            // Automatically generate the image
+            generateImage();
+        }
+    </script>
+</body>
+</html>
